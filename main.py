@@ -1,121 +1,105 @@
-import os
-from PIL import Image, ImageDraw
 import imageio.v2 as imageio
+import numpy as np
+import os 
 from collections import deque
 
-# Utility function to check if the given cell is valid
-def is_valid(x, y, width, height, visited):
-    return 0 <= x < width and 0 <= y < height and not visited[y][x]
+class ImageTraversal:
+    def __init__(self, image, start_point, tolerance=0.5):
+        self.image = image
+        self.start_point = start_point
+        self.tolerance = tolerance
+        self.visited = [[False for _ in range(image.shape[1])] for _ in range(image.shape[0])]
+        self.to_visit = deque([start_point])
+        self.width, self.height = image.shape[1], image.shape[0]
 
-def bfs_traversal(img):
-    width, height = img.size
-    visited = [[False for _ in range(width)] for _ in range(height)]
+    # Inside ImageTraversal class
+    def calculate_delta(self, p1, p2):
+        return sum(abs(int(p1[i]) - int(p2[i])) for i in range(3))  # Cast to int to handle overflow
 
-    # Directions for up, down, left, right
-    directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    def is_valid(self, point):
+        x, y = point
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return False
+        if self.visited[y][x]:
+            return False
+        if self.calculate_delta(self.image[self.start_point[1], self.start_point[0]], self.image[y, x]) >= self.tolerance:
+            return False
+        return True
 
+    def add(self, point):
+        if self.is_valid(point):
+            self.to_visit.append(point)
+
+    def pop(self):
+        return self.to_visit.popleft()
+    
+    def begin(self):
+        return self.Iterator(self)
+
+    def end(self):
+        return None
+
+    class Iterator:
+        def __init__(self, traversal):
+            self.traversal = traversal
+            self.current = traversal.start_point
+
+        def __next__(self):
+            if not self.traversal.to_visit:
+                raise StopIteration
+
+            self.current = self.traversal.pop()
+
+            x, y = self.current
+
+            # Add neighbors
+            neighbors = [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)]
+            for n in neighbors:
+                self.traversal.add(n)
+
+            return self.current
+
+        def __iter__(self):
+            return self
+
+
+def create_gif_from_folder(folder_path, gif_name='output.gif'):
     frames = []
 
-    queue = deque([(0, 0)])
-    visited[0][0] = True
+    for filename in sorted(os.listdir(folder_path)):
+        if filename.endswith(('.png', '.jpg', '.jpeg')):
+            image_path = os.path.join(folder_path, filename)
+            
+            # BFS traversal
+            image_data_bfs = imageio.imread(image_path)
+            bfs_traversal = ImageTraversal(image_data_bfs, (0, 0))
+            for point in bfs_traversal.begin():
+                x, y = point
+                if image_data_bfs.shape[2] == 4:  # Check for alpha channel
+                    image_data_bfs[y][x] = [255, 0, 0, 255]  # Red color with full opacity
+                else:
+                    image_data_bfs[y][x] = [255, 0, 0]
+            frames.append(image_data_bfs)  # Append the frame from BFS traversal
+            
+            # Reload the image data for DFS
+            # image_data_dfs = imageio.imread(image_path)
+            
+            # # DFS traversal
+            # dfs_traversal = ImageTraversal(image_data_dfs, (0, 0))
+            # for point in dfs_traversal.begin():
+            #     x, y = point
+            #     if image_data_dfs.shape[2] == 4:  # Check for alpha channel
+            #         image_data_dfs[y][x] = [255, 0, 0, 255]  # Red color with full opacity
+            #     else:
+            #         image_data_dfs[y][x] = [255, 0, 0]
+            # frames.append(image_data_dfs)  # Append the frame from DFS traversal
 
-    while queue:
-        x, y = queue.popleft()
-        frame = Image.new('RGB', img.size, color=(255, 255, 255))
-        frame.paste(img.crop((0, 0, x + 1, y + 1)), (0, 0))
-        frames.append(frame)
+    # Save all the frames as a GIF
+    imageio.mimsave(gif_name, frames, duration=0.5)
 
-        for dx, dy in directions:
-            new_x, new_y = x + dx, y + dy
-            if is_valid(new_x, new_y, width, height, visited):
-                visited[new_y][new_x] = True
-                queue.append((new_x, new_y))
+def main():
+    folder_path = "images"
+    create_gif_from_folder(folder_path)
 
-    return frames
-
-def dfs_traversal(img, x, y, frames, visited):
-    width, height = img.size
-
-    # Base case
-    if not is_valid(x, y, width, height, visited):
-        return
-
-    visited[y][x] = True
-    frame = Image.new('RGB', img.size, color=(255, 255, 255))
-    frame.paste(img.crop((0, 0, x + 1, y + 1)), (0, 0))
-    frames.append(frame)
-
-    # Directions for up, down, left, right
-    directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
-
-    for dx, dy in directions:
-        dfs_traversal(img, x + dx, y + dy, frames, visited)
-
-def save_gif(frames, output_gif_path):
-    imageio.mimsave(output_gif_path, [frame.convert('P', dither=Image.NONE, palette=Palette.ADAPTIVE) for frame in frames], duration=0.1)
-
-def create_image_row_or_column(image_path, num, direction='horizontal'):
-    """ 
-    Create a row or column of the same image.
-    direction: 'horizontal' or 'vertical'
-    """
-    img = Image.open(image_path)
-    width, height = img.size
-    
-    if direction == 'horizontal':
-        canvas = Image.new('RGB', (width*num, height))
-        for i in range(num):
-            canvas.paste(img, (i*width, 0))
-    else:  # 'vertical'
-        canvas = Image.new('RGB', (width, height*num))
-        for i in range(num):
-            canvas.paste(img, (0, i*height))
-    
-    return canvas
-
-def bfs_traversal_linear(img, num, direction='horizontal'):
-    if direction == 'horizontal':
-        cell_width, cell_height = img.size[0] // num, img.size[1]
-        directions = [(1, 0), (-1, 0)]
-    else:
-        cell_width, cell_height = img.size[0], img.size[1] // num
-        directions = [(0, 1), (0, -1)]
-
-    visited = [[False for _ in range(num)]]
-    frames = []
-
-    queue = deque([(0, 0)])
-    visited[0][0] = True
-
-    while queue:
-        x, y = queue.popleft()
-        frame = Image.new('RGB', img.size, color=(255, 255, 255))
-        if direction == 'horizontal':
-            frame.paste(img.crop((0, 0, (x+1)*cell_width, cell_height)), (0, 0))
-        else:
-            frame.paste(img.crop((0, 0, cell_width, (y+1)*cell_height)), (0, 0))
-        frames.append(frame)
-
-        for dx, dy in directions:
-            new_x, new_y = x + dx, y + dy
-            if is_valid(new_x, new_y, num, 1, visited):
-                visited[new_y][new_x] = True
-                queue.append((new_x, new_y))
-
-    return frames
-
-
-# Example usage:
-image_path = 'path_to_your_image.jpg'
-output_folder_path = 'path_for_output_gifs'
-os.makedirs(output_folder_path, exist_ok=True)
-
-# Horizontal Row
-row_img = create_image_row_or_column(image_path, 3, 'horizontal')
-bfs_frames_row = bfs_traversal_linear(row_img, 3, 'horizontal')
-save_gif(bfs_frames_row, os.path.join(output_folder_path, 'bfs_row_traversal.gif'))
-
-# Vertical Column
-col_img = create_image_row_or_column(image_path, 3, 'vertical')
-bfs_frames_col = bfs_traversal_linear(col_img, 3, 'vertical')
-save_gif(bfs_frames_col, os.path.join(output_folder_path, 'bfs_col_traversal.gif'))
+if __name__ =='__main__':
+    main()
